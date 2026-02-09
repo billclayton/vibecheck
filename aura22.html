@@ -1,0 +1,162 @@
+
+import React, { useState, useEffect, useCallback } from 'react';
+import PhotoUploader from './components/PhotoUploader';
+import ScoreCard from './components/ScoreCard';
+import ChatInterface from './components/ChatInterface';
+import { AnalysisResult, ImageState } from './types';
+import { analyzeImage, editImageWithAI } from './services/geminiService';
+
+const App: React.FC = () => {
+  const [imageState, setImageState] = useState<ImageState>({
+    original: null,
+    current: null,
+    history: []
+  });
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImageCaptured = async (base64: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await analyzeImage(base64);
+      setAnalysis(result);
+      setImageState({
+        original: base64,
+        current: base64,
+        history: [base64]
+      });
+    } catch (err) {
+      console.error(err);
+      setError("Failed to analyze image. Ensure your API key is valid and you're using a supported format.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAIAction = async (prompt: string) => {
+    if (!imageState.current) return;
+    
+    setIsLoading(true);
+    setError(null);
+    try {
+      const editedBase64 = await editImageWithAI(imageState.current, prompt);
+      
+      // Re-analyze the new image to show improvements
+      const newAnalysis = await analyzeImage(editedBase64);
+      
+      setImageState(prev => ({
+        ...prev,
+        current: editedBase64,
+        history: [...prev.history, editedBase64]
+      }));
+      setAnalysis(newAnalysis);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to modify image. The AI might be busy or the request was too complex.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const reset = () => {
+    setImageState({ original: null, current: null, history: [] });
+    setAnalysis(null);
+    setError(null);
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen max-w-2xl mx-auto bg-gray-950 shadow-2xl overflow-hidden">
+      {/* Header */}
+      <header className="p-6 flex justify-between items-center border-b border-white/5 bg-gray-900/50">
+        <div>
+          <h1 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
+            AURAGRADE
+          </h1>
+          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Powered by Gemini Vision</p>
+        </div>
+        {imageState.current && (
+          <button 
+            onClick={reset}
+            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-full text-gray-400 transition-colors"
+          >
+            New Photo
+          </button>
+        )}
+      </header>
+
+      <main className="flex-1 overflow-y-auto p-4 space-y-6 pb-32">
+        {!imageState.current ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-8 animate-in fade-in slide-in-from-bottom-4">
+            <div className="space-y-2">
+              <h2 className="text-3xl font-bold">Discover Your Vibe</h2>
+              <p className="text-gray-400 text-sm max-w-xs mx-auto">Upload a photo to get graded on attractiveness and coolness, then use AI to enhance your style.</p>
+            </div>
+            <PhotoUploader onImageCaptured={handleImageCaptured} />
+            {isLoading && (
+              <div className="flex items-center gap-3 text-purple-400 font-medium">
+                <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                Analyzing your aura...
+              </div>
+            )}
+            {error && <p className="text-red-400 text-sm bg-red-400/10 p-3 rounded-xl border border-red-400/20">{error}</p>}
+          </div>
+        ) : (
+          <div className="space-y-6 animate-in zoom-in-95 duration-300">
+            {/* Image Preview */}
+            <div className="relative group">
+              <img 
+                src={imageState.current} 
+                className="w-full rounded-3xl shadow-2xl border-2 border-white/5 aspect-[4/5] object-cover"
+                alt="Analyzed content" 
+              />
+              {imageState.history.length > 1 && (
+                <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-md text-[10px] font-bold text-white px-3 py-1 rounded-full border border-white/20">
+                  AI MODIFIED
+                </div>
+              )}
+            </div>
+
+            {/* Analysis Dashboard */}
+            {analysis && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <ScoreCard label="Attractiveness" score={analysis.attractiveness} color="#a855f7" />
+                  <ScoreCard label="Coolness" score={analysis.coolness} color="#ec4899" />
+                </div>
+
+                <div className="bg-gray-800/40 p-5 rounded-3xl border border-white/5 space-y-3">
+                  <h3 className="font-bold text-lg text-purple-400">Expert Verdict</h3>
+                  <p className="text-gray-300 text-sm leading-relaxed">{analysis.explanation}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="font-bold text-sm uppercase tracking-widest text-gray-500 px-1">How to improve</h3>
+                  <div className="space-y-2">
+                    {analysis.suggestions.map((s, i) => (
+                      <div key={i} className="flex gap-3 bg-white/5 p-4 rounded-2xl border border-white/5 items-start">
+                        <span className="text-purple-500 font-bold"># {i + 1}</span>
+                        <p className="text-gray-300 text-sm">{s}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            {error && <p className="text-red-400 text-sm bg-red-400/10 p-3 rounded-xl border border-red-400/20">{error}</p>}
+          </div>
+        )}
+      </main>
+
+      {/* Floating Chatbot - Always Visible if image exists */}
+      {imageState.current && (
+        <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto z-50">
+          <ChatInterface onAction={handleAIAction} isProcessing={isLoading} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
